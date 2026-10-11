@@ -9,19 +9,22 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 NINEROUTER_URL = os.environ.get('NINEROUTER_URL', 'http://localhost:20128')
 NINEROUTER_API_KEY = os.environ.get('NINEROUTER_API_KEY')
-MASTER_PROMPT = os.environ.get('MASTER_PROMPT', 'You are ExamAce...') # Paste your full prompt here as a Railway variable
+MASTER_PROMPT = os.environ.get('MASTER_PROMPT', 'You are ExamAce...')
+
+# ✨ NEW: Model name is now an environment variable
+LLM_MODEL = os.environ.get('LLM_MODEL', 'unorouter/gemini-3.6-flash:free')
+
 TELEGRAM_API = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}'
 
 # --- In-memory state store (for the quiz session) ---
-# For a single-user bot, this is sufficient. For multiple users, use a database.
 user_states = {}
 
 def get_user_state(chat_id):
     """Retrieve or initialize state for a user."""
     if chat_id not in user_states:
         user_states[chat_id] = {
-            "history": [],  # Store recent messages for context
-            "session_data": {} # Store quiz-specific state if needed
+            "history": [],
+            "session_data": {}
         }
     return user_states[chat_id]
 
@@ -31,7 +34,7 @@ def send_telegram_message(chat_id, text):
     payload = {
         'chat_id': chat_id,
         'text': text,
-        'parse_mode': 'Markdown' # Enables formatting for reports
+        'parse_mode': 'Markdown'
     }
     try:
         requests.post(url, json=payload, timeout=10)
@@ -50,15 +53,12 @@ def telegram_webhook():
         if not user_message:
             return jsonify({'status': 'ok'})
         
-        # Get user's state (for context history)
         state = get_user_state(chat_id)
         
-        # Build messages for the LLM, including history and master prompt
         messages = [
             {"role": "system", "content": MASTER_PROMPT}
         ]
-        # Add recent history for context
-        messages.extend(state['history'][-10:]) # Keep last 10 messages
+        messages.extend(state['history'][-10:])
         messages.append({"role": "user", "content": user_message})
         
         # --- Call 9router ---
@@ -68,7 +68,7 @@ def telegram_webhook():
                 'Content-Type': 'application/json'
             }
             payload = {
-                "model": "gemini/gemini-1.5-flash-latest", # Or your preferred model
+                "model": LLM_MODEL, # ✨ Uses the environment variable
                 "messages": messages,
                 "stream": False
             }
@@ -81,11 +81,9 @@ def telegram_webhook():
             response.raise_for_status()
             ai_reply = response.json()['choices'][0]['message']['content']
             
-            # Update user history (for context)
             state['history'].append({"role": "user", "content": user_message})
             state['history'].append({"role": "assistant", "content": ai_reply})
             
-            # Send reply back to Telegram
             send_telegram_message(chat_id, ai_reply)
             
         except Exception as e:
@@ -101,6 +99,5 @@ def health_check():
     return jsonify({'status': 'ok', 'storage': 'in-memory'})
 
 if __name__ == '__main__':
-    # Railway provides the PORT environment variable
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
